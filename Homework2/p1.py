@@ -2,7 +2,7 @@ import sys
 from pyspark.sql import SparkSession
 import argparse
 from pyspark.sql.functions import udf
-from pyspark.sql.types import StringType
+from pyspark.sql.types import StringType,DoubleType, IntegerType
 from pyspark.sql.functions import when, col, count,lit
 
 def create_dataframe(filepath, format, spark):
@@ -35,20 +35,14 @@ def transform_nhis_data(nhis_df):
     :return: spark df, transformed df
     """
     
-
-    nhis_df = nhis_df.withColumn("_AGEG5YR", map_age_udf(col("AGE_P")))
-
+    nhis_df = nhis_df.withColumn("AGE_P", map_age_udf(col("AGE_P")))
     # Rename the columns to match the BRFSS dataset
-    nhis_df = nhis_df.withColumnRenamed("AGE_P", "AGEG5YR")\
+    nhis_df = nhis_df.withColumnRenamed("AGE_P", "_AGEG5YR")\
                      .withColumnRenamed("MRACBPI2", "_IMPRACE")
-
-    # Transform 'DIBEV1' from '2' meaning "No" to '0' to match binary encoding for disease prevalence
-    transformed_df = nhis_df.withColumn("DIBEV1", when(col("DIBEV1") == 2, 0).otherwise(1))
-
+    
+    nhis_df = nhis_df.dropna(subset=["_AGEG5YR", "SEX", "_IMPRACE", "DIBEV1"])
     # Drop rows with any null values in the key columns
-    # transformed_df = nhis_df.dropna(subset=["_AGEG5YR", "SEX", "_IMPRACE", "DIBEV1"])
-
-    return transformed_df
+    return nhis_df
 
 def map_age_to_brfss_category(age):
     if age >= 80:
@@ -80,28 +74,35 @@ def map_age_to_brfss_category(age):
     else:
         return 14  # Don't know/Refused/Missing
 
-map_age_udf = udf(map_age_to_brfss_category, StringType())
+map_age_udf = udf(map_age_to_brfss_category, IntegerType())
 
-def calculate_statistics(joined_df):
+def report_summary_stats(joined_df):
     """
     Calculate prevalence statistics
 
     :param joined_df: the joined df
 
     :return: None
-    """
+    # """
 
-    joined_df.show(truncate=False) 
+    # try:
+    #     joined_df.show(truncate=False)
+    #     print('I AM RIGHT HERE')
+    # except Exception as e:
+    #     print(f"An error occurred: {e}")
+        
+    # joined_df.show(truncate=False) 
+    #Calculate disease prevalence by race
     # race_prevalence = joined_df.groupBy('_IMPRACE').agg(
     #     count(when(col('DIBEV1') == 1, True)).alias('Disease_Prevalence'),
     #     count(lit(1)).alias('Total_Count')
     # ).withColumn('Prevalence_Rate', (col('Disease_Prevalence') / col('Total_Count')) * 100)
     
-    # # Calculate disease prevalence by gender
-    # gender_prevalence = joined_df.groupBy('SEX').agg(
-    #     count(when(col('DIBEV1') == 1, True)).alias('Disease_Prevalence'),
-    #     count(lit(1)).alias('Total_Count')
-    # ).withColumn('Prevalence_Rate', (col('Disease_Prevalence') / col('Total_Count')) * 100)
+    # Calculate disease prevalence by gender
+    gender_prevalence = joined_df.groupBy('SEX').agg(
+        count(when(col('DIBEV1') == 1, True)).alias('Disease_Prevalence'),
+        count(lit(1)).alias('Total_Count')
+    ).withColumn('Prevalence_Rate', (col('Disease_Prevalence') / col('Total_Count')) * 100)
     
     # # Calculate disease prevalence by BRFSS categorical age
     # age_prevalence = joined_df.groupBy('_AGEG5YR').agg(
@@ -110,11 +111,13 @@ def calculate_statistics(joined_df):
     # ).withColumn('Prevalence_Rate', (col('Disease_Prevalence') / col('Total_Count')) * 100)
 
     # # Print the statistics for disease prevalence
+    # # debug this
     # print("Disease Prevalence by Race and Ethnic Background:")
     # race_prevalence.show(truncate=False)
-
-    # print("Disease Prevalence by Gender:")
-    # gender_prevalence.show(truncate=False)
+    
+    #debug this
+    print("Disease Prevalence by Gender:")
+    gender_prevalence.show(truncate=False)
     
     # print("Disease Prevalence by BRFSS Categorical Age:")
     # age_prevalence.show(truncate=False)
@@ -130,31 +133,14 @@ def join_data(brfss_df, nhis_df):
     :return: the joined df
 
     """
-    # brfss_df.printSchema()
     
-    joined_df = brfss_df.join(nhis_df, on=['_AGEG5YR','_IMPRACE', 'SEX'], how='inner')
-    
+    joined_df = brfss_df.join(nhis_df, on=['_AGEG5YR', '_IMPRACE', 'SEX'], how='inner')
     joined_df = joined_df.select("SEX", "_IMPRACE", "_AGEG5YR", "_LLCPWT", "DIBEV1")
-    joined_df.printSchema()
+    
+    
+    #drop na
 
     
-
-
-    # joined_df = joined_df.select(
-    #     *[col(c) for c in joined_df.columns if c != "nhis_df._AGEG5YR"],  
-    # )
-    
-    # if [f for f in joined_df.schema.fields if f.name == "_AGEG5YR" and isinstance(f.dataType, StringType)]:
-    #     # If _AGEG5YR is of StringType in the schema, perhaps you want to drop it or handle differently
-    #     # Assuming you want to drop this column if it's a string
-    #     joined_df = joined_df.drop("_AGEG5YR")
-    # joined_df.printSchema()
-    # # Get list of column names that are not of string type
-    # non_string_columns = [f.name for f in joined_df.schema.fields if f.dataType != StringType()]
-    # non_string_columns.printSchema()
-    # # # Select these columns
-    # # joined_df = joined_df.select(*[col(c) for c in non_string_columns])
-    # # joined_df.printSchema()
     
     return joined_df
 
@@ -179,14 +165,13 @@ if __name__ == '__main__':
         # load dataframes
         brfss_df = create_dataframe(brfss_filename, 'json', spark)
         nhis_df = create_dataframe(nhis_filename, 'csv', spark)
-
         # Perform mapping on nhis dataframe
-        nhis_df = transform_nhis_data(nhis_df)
+        nhis_df_transformed = transform_nhis_data(nhis_df)
         # Join brfss and nhis df
-        joined_df = join_data(brfss_df, nhis_df)
+        joined_df = join_data(brfss_df, nhis_df_transformed)
         # Calculate statistics
-        print(joined_df)
-        # calculate_statistics(joined_df)
+        # print(joined_df)
+        report_summary_stats(joined_df)
 
         # # Save
         # if args.output:
