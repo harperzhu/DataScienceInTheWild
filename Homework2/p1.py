@@ -39,7 +39,7 @@ def transform_nhis_data(nhis_df):
     nhis_df = nhis_df.withColumn("_AGEG5YR", map_age_udf(col("AGE_P")))
 
     # Rename the columns to match the BRFSS dataset
-    nhis_df = nhis_df.withColumnRenamed("AGE_P", "NHIS_AGEG5YR")\
+    nhis_df = nhis_df.withColumnRenamed("AGE_P", "AGEG5YR")\
                      .withColumnRenamed("MRACBPI2", "_IMPRACE")
 
     # Transform 'DIBEV1' from '2' meaning "No" to '0' to match binary encoding for disease prevalence
@@ -52,33 +52,33 @@ def transform_nhis_data(nhis_df):
 
 def map_age_to_brfss_category(age):
     if age >= 80:
-        return '13'  # Age 80 or older
+        return 13  # Age 80 or older
     elif age >= 75:
-        return '12'  # Age 75 to 79
+        return 12  # Age 75 to 79
     elif age >= 70:
-        return '11'  # Age 70 to 74
+        return 11  # Age 70 to 74
     elif age >= 65:
-        return '10'  # Age 65 to 69
+        return 10  # Age 65 to 69
     elif age >= 60:
-        return '9'   # Age 60 to 64
+        return 9   # Age 60 to 64
     elif age >= 55:
-        return '8'   # Age 55 to 59
+        return 8   # Age 55 to 59
     elif age >= 50:
-        return '7'   # Age 50 to 54
+        return 7   # Age 50 to 54
     elif age >= 45:
-        return '6'   # Age 45 to 49
+        return 6   # Age 45 to 49
     elif age >= 40:
-        return '5'   # Age 40 to 44
+        return 5   # Age 40 to 44
     elif age >= 35:
-        return '4'   # Age 35 to 39
+        return 4   # Age 35 to 39
     elif age >= 30:
-        return '3'   # Age 30 to 34
+        return 3   # Age 30 to 34
     elif age >= 25:
-        return '2'   # Age 25 to 29
+        return 2   # Age 25 to 29
     elif age >= 18:
-        return '1'   # Age 18 to 24
+        return 1   # Age 18 to 24
     else:
-        return '14'  # Don't know/Refused/Missing
+        return 14  # Don't know/Refused/Missing
 
 map_age_udf = udf(map_age_to_brfss_category, StringType())
 
@@ -132,7 +132,11 @@ def join_data(brfss_df, nhis_df):
     """
     # brfss_df.printSchema()
     
-    joined_df = brfss_df.join(nhis_df, on=['_IMPRACE', 'SEX'], how='inner')
+    joined_df = brfss_df.join(nhis_df, on=['_AGEG5YR','_IMPRACE', 'SEX'], how='inner')
+    
+    joined_df = joined_df.select("SEX", "_IMPRACE", "_AGEG5YR", "_LLCPWT", "DIBEV1")
+    joined_df.printSchema()
+
     
 
 
